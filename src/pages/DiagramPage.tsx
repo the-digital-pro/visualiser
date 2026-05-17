@@ -31,7 +31,7 @@ export function DiagramPage() {
   const referentialIssues = issues.filter((i) => i.tier === "referential");
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 px-4 py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Breadcrumb />
         <div className="flex items-center gap-2">

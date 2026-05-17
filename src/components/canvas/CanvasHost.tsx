@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useHotkeys } from "react-hotkeys-hook";
 import {
   Background,
   Controls,
@@ -9,6 +10,7 @@ import {
   useReactFlow,
   type Connection,
   type Edge as RFEdge,
+  type EdgeChange,
   type Node as RFNode,
   type NodeChange,
   type NodeMouseHandler,
@@ -204,6 +206,55 @@ function CanvasInner({
     storeActions.setSelection({ edgeId: edge.id });
   }, []);
 
+  /**
+   * Delete from MY store, not React Flow's. Selection lives in
+   * `store.selection`; RF doesn't track controlled `selected: true` flags
+   * on nodes, so its built-in delete-key handling can't see what the user
+   * has picked. `enableOnFormTags: false` keeps Backspace from nuking the
+   * graph while the user is editing a property panel input.
+   */
+  useHotkeys(
+    ["backspace", "delete"],
+    () => {
+      if (!editable) return;
+      const selection = useStore.getState().selection;
+      if (!selection) return;
+      if (selection.nodeId && !parseExternalId(selection.nodeId)) {
+        const removed = selection.nodeId;
+        editor.commit(project.id, (p) => ({
+          ...p,
+          diagrams: p.diagrams.map((d) =>
+            d.id !== diagramId
+              ? d
+              : {
+                  ...d,
+                  nodes: d.nodes.filter((n) => n.id !== removed),
+                  edges: d.edges.filter(
+                    (e) =>
+                      e.source !== removed &&
+                      (e.target ? e.target !== removed : true),
+                  ),
+                },
+          ),
+        }));
+        storeActions.setSelection(null);
+      } else if (selection.edgeId && !selection.edgeId.startsWith("rev-")) {
+        const removed = selection.edgeId;
+        editor.commit(project.id, (p) => ({
+          ...p,
+          diagrams: p.diagrams.map((d) =>
+            d.id !== diagramId
+              ? d
+              : { ...d, edges: d.edges.filter((e) => e.id !== removed) },
+          ),
+        }));
+        storeActions.setSelection(null);
+      }
+    },
+    { enableOnFormTags: false, preventDefault: true },
+    [editable, project.id, diagramId],
+  );
+
   const onPaneClick = useCallback(() => {
     storeActions.setSelection(null);
   }, []);
@@ -231,32 +282,64 @@ function CanvasInner({
   }, [editable, project.id]);
 
   /**
-   * Stream every drag tick straight into the store via applyTransient so the
-   * controlled `nodes` prop stays in lockstep with React Flow's internal
-   * drag state. Without this the prop revert on every re-render and the
-   * cursor "fights" the node. dragStart already beginTransient'd, so we just
-   * apply here — the single history entry lands in onNodeDragStop's commit.
+   * Controlled-mode change router (ADR-0006 + ADR-0009).
+   *
+   *   - `position` (during drag): stream into the store via applyTransient so
+   *     the controlled `nodes` prop tracks React Flow's drag state. The
+   *     surrounding `onNodeDragStart` / `onNodeDragStop` bracket the burst
+   *     into one history entry.
+   *   - `remove`: commit a deletion. We can't rely on the separate
+   *     `onNodesDelete` callback when nodes are fully controlled — providing
+   *     `onNodesChange` makes RF route delete events here exclusively.
+   *
+   * Other change types (`select`, `dimensions`) are ignored — selection has
+   * its own channel via `onSelectionChange`, and dimensions are display-only.
    */
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
       if (!editable) return;
+      const removedIds = new Set<string>();
       for (const c of changes) {
-        if (c.type !== "position" || !c.position) continue;
-        if (parseExternalId(c.id)) continue; // synthetic externals aren't draggable
-        const pos = c.position;
-        editor.applyTransient(project.id, (p) => ({
+        if (c.type === "position" && c.position) {
+          if (parseExternalId(c.id)) continue;
+          const pos = c.position;
+          editor.applyTransient(project.id, (p) => ({
+            ...p,
+            diagrams: p.diagrams.map((d) =>
+              d.id !== diagramId
+                ? d
+                : {
+                    ...d,
+                    nodes: d.nodes.map((n) =>
+                      n.id === c.id ? { ...n, position: { x: pos.x, y: pos.y } } : n,
+                    ),
+                  },
+            ),
+          }));
+        } else if (c.type === "remove") {
+          if (parseExternalId(c.id)) continue;
+          removedIds.add(c.id);
+        }
+      }
+      if (removedIds.size > 0) {
+        editor.commit(project.id, (p) => ({
           ...p,
           diagrams: p.diagrams.map((d) =>
             d.id !== diagramId
               ? d
               : {
                   ...d,
-                  nodes: d.nodes.map((n) =>
-                    n.id === c.id ? { ...n, position: { x: pos.x, y: pos.y } } : n,
+                  nodes: d.nodes.filter((n) => !removedIds.has(n.id)),
+                  // Edges that referenced the removed nodes go with them.
+                  edges: d.edges.filter(
+                    (e) =>
+                      !removedIds.has(e.source) &&
+                      (e.target ? !removedIds.has(e.target) : true),
                   ),
                 },
           ),
         }));
+        storeActions.setSelection(null);
       }
     },
     [editable, project.id, diagramId],
@@ -340,40 +423,33 @@ function CanvasInner({
     e.dataTransfer.dropEffect = "copy";
   }, [editable]);
 
-  const onNodesDelete = useCallback(
-    (deleted: RFNode[]) => {
+  /**
+   * Edge controlled-mode change router. Same shape as `onNodesChange`: process
+   * `remove` here because providing the callback routes deletes through this
+   * channel exclusively. Reverse-edges (`rev-...`) and synthetic externals
+   * are derived/non-editable, so we skip them.
+   */
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
       if (!editable) return;
-      const ids = new Set(deleted.map((n) => n.id).filter((id) => !parseExternalId(id)));
-      if (ids.size === 0) return;
-      editor.commit(project.id, (p) => ({
-        ...p,
-        diagrams: p.diagrams.map((d) =>
-          d.id !== diagramId
-            ? d
-            : {
-                ...d,
-                nodes: d.nodes.filter((n) => !ids.has(n.id)),
-                edges: d.edges.filter(
-                  (e) => !ids.has(e.source) && (e.target ? !ids.has(e.target) : true),
-                ),
-              },
-        ),
-      }));
-      storeActions.setSelection(null);
-    },
-    [editable, project.id, diagramId],
-  );
-
-  const onEdgesDelete = useCallback(
-    (deleted: RFEdge[]) => {
-      if (!editable) return;
-      const ids = new Set(deleted.map((e) => e.id));
-      editor.commit(project.id, (p) => ({
-        ...p,
-        diagrams: p.diagrams.map((d) =>
-          d.id !== diagramId ? d : { ...d, edges: d.edges.filter((e) => !ids.has(e.id)) },
-        ),
-      }));
+      const removedIds = new Set<string>();
+      for (const c of changes) {
+        if (c.type !== "remove") continue;
+        if (typeof c.id !== "string") continue;
+        if (c.id.startsWith("rev-")) continue;
+        removedIds.add(c.id);
+      }
+      if (removedIds.size > 0) {
+        editor.commit(project.id, (p) => ({
+          ...p,
+          diagrams: p.diagrams.map((d) =>
+            d.id !== diagramId
+              ? d
+              : { ...d, edges: d.edges.filter((e) => !removedIds.has(e.id)) },
+          ),
+        }));
+        storeActions.setSelection(null);
+      }
     },
     [editable, project.id, diagramId],
   );
@@ -396,17 +472,16 @@ function CanvasInner({
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         onNodesChange={editable ? onNodesChange : undefined}
+        onEdgesChange={editable ? onEdgesChange : undefined}
         onNodeDragStart={editable ? onNodeDragStart : undefined}
         onNodeDragStop={editable ? onNodeDragStop : undefined}
         onConnect={editable ? onConnect : undefined}
-        onNodesDelete={editable ? onNodesDelete : undefined}
-        onEdgesDelete={editable ? onEdgesDelete : undefined}
         nodesDraggable={editable}
         nodesConnectable={editable}
         elementsSelectable
         snapToGrid={editable}
         snapGrid={[20, 20]}
-        deleteKeyCode={editable ? ["Backspace", "Delete"] : null}
+        deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
         fitView
       >

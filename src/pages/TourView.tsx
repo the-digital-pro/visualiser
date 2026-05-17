@@ -153,7 +153,7 @@ export function TourView() {
   const atEnd = resolved.index === resolved.total;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 px-4 py-4">
       <header className="flex items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 p-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">

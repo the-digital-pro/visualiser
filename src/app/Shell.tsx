@@ -19,7 +19,7 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 h-14 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex h-full max-w-screen-2xl items-center justify-between px-4">
+        <div className="flex h-full items-center justify-between px-4">
           <Link
             to="/"
             state={{ navStack: [] }}

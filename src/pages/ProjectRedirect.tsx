@@ -38,10 +38,14 @@ export function ProjectRedirect() {
 
   if (error) {
     return (
-      <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm">
-        {error}
+      <div className="mx-auto max-w-screen-md px-4 py-4">
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm">
+          {error}
+        </div>
       </div>
     );
   }
-  return <div className="text-muted-foreground">Resolving home diagram…</div>;
+  return (
+    <div className="px-4 py-4 text-muted-foreground">Resolving home diagram…</div>
+  );
 }

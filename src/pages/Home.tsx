@@ -128,7 +128,7 @@ export function Home() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-screen-2xl space-y-4 px-4 py-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>

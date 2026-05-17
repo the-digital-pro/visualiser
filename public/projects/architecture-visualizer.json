@@ -1,0 +1,374 @@
+{
+  "schemaVersion": 1,
+  "id": "architecture-visualizer",
+  "name": "Architecture Visualizer",
+  "description": "Single-page React app for authoring and navigating layered architecture diagrams. Two modes in one app — Present (read-only) and Editor (tree-shakeable). No backend in v1; projects load from public/projects/*.json and editor drafts live in localStorage.",
+  "tags": [
+    "react",
+    "vite",
+    "single-page-app",
+    "no-backend"
+  ],
+  "homeDiagramId": "context",
+  "diagrams": [
+    {
+      "id": "context",
+      "name": "System context",
+      "description": "Top-level view. Drill into the SPA for internal layering.",
+      "nodes": [
+        {
+          "id": "architect",
+          "kind": "actor",
+          "name": "Architect / consumer",
+          "description": "Solutions Architects author diagrams; devs, BAs, OPS, and QA navigate them like a map.",
+          "position": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        {
+          "id": "vite-build",
+          "kind": "infra",
+          "name": "Vite + projects-plugin",
+          "description": "Vite dev/build with the custom projects-plugin: validates project JSON with Zod at build time, emits manifest.json + search-index.json. Structural errors fail the build (ADR-0002).",
+          "tags": [
+            "build"
+          ],
+          "position": {
+            "x": 320,
+            "y": 60
+          }
+        },
+        {
+          "id": "visualizer",
+          "kind": "application",
+          "name": "Architecture Visualizer (SPA)",
+          "description": "React 18 + TypeScript SPA built with Vite. React Flow canvas, Zustand state, react-router-dom v6. Drill in for internal layering.",
+          "childDiagramId": "app",
+          "tags": [
+            "client"
+          ],
+          "position": {
+            "x": 320,
+            "y": 200
+          }
+        },
+        {
+          "id": "project-files",
+          "kind": "datastore",
+          "name": "Bundled project JSON",
+          "description": "public/projects/*.json — one file per project plus generated manifest.json and search-index.json. Source of truth for Present mode.",
+          "tags": [
+            "file"
+          ],
+          "position": {
+            "x": 640,
+            "y": 60
+          }
+        },
+        {
+          "id": "local-storage",
+          "kind": "datastore",
+          "name": "Browser localStorage",
+          "description": "Editor draft autosave at key `arcviz:draft:<projectId>` (ADR-0004). Present mode never reads from here.",
+          "tags": [
+            "storage"
+          ],
+          "position": {
+            "x": 640,
+            "y": 200
+          }
+        },
+        {
+          "id": "file-system",
+          "kind": "infra",
+          "name": "File system / downloads",
+          "description": "File System Access API (where available) and browser download fallback. Used for Export JSON and Import JSON in the editor.",
+          "tags": [
+            "external"
+          ],
+          "position": {
+            "x": 640,
+            "y": 340
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-architect-visualizer",
+          "source": "architect",
+          "target": "visualizer",
+          "type": "rest",
+          "label": "loads / edits"
+        },
+        {
+          "id": "e-build-visualizer",
+          "source": "vite-build",
+          "target": "visualizer",
+          "type": "file",
+          "label": "bundles"
+        },
+        {
+          "id": "e-build-projects",
+          "source": "vite-build",
+          "target": "project-files",
+          "type": "file",
+          "label": "validates + indexes"
+        },
+        {
+          "id": "e-visualizer-projects",
+          "source": "visualizer",
+          "target": "project-files",
+          "type": "file",
+          "label": "fetch JSON"
+        },
+        {
+          "id": "e-visualizer-storage",
+          "source": "visualizer",
+          "target": "local-storage",
+          "type": "file",
+          "label": "draft autosave"
+        },
+        {
+          "id": "e-visualizer-fs",
+          "source": "visualizer",
+          "target": "file-system",
+          "type": "file",
+          "label": "export / import"
+        }
+      ]
+    },
+    {
+      "id": "app",
+      "name": "SPA internals",
+      "description": "How the visualizer SPA is layered. Routing shell on the left, single persistent canvas in the middle, lib modules underneath.",
+      "nodes": [
+        {
+          "id": "entry",
+          "kind": "application",
+          "name": "main.tsx",
+          "description": "App entry. Mounts React, the theme provider, and the router.",
+          "position": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        {
+          "id": "router",
+          "kind": "service",
+          "name": "Router",
+          "description": "react-router-dom v6 BrowserRouter. URL is the source of truth on cold load. Editor routes (`/edit/*`) are absent when VITE_EDITOR_ENABLED=false.",
+          "position": {
+            "x": 280,
+            "y": 200
+          }
+        },
+        {
+          "id": "shell",
+          "kind": "service",
+          "name": "Shell",
+          "description": "Top-level layout: command palette, mode toggle, theme switcher, breadcrumb. Mounts the persistent canvas once (ADR-0006).",
+          "position": {
+            "x": 280,
+            "y": 60
+          }
+        },
+        {
+          "id": "nav-controller",
+          "kind": "service",
+          "name": "NavigationController",
+          "description": "Single owner of the semantic back-stack (ADR-0003). All in-app navigation routes through here; stack rides in history.state.",
+          "position": {
+            "x": 560,
+            "y": 60
+          }
+        },
+        {
+          "id": "pages",
+          "kind": "service",
+          "name": "Routed pages",
+          "description": "Home, DiagramPage, EditorView (lazy), TourView, ProjectRedirect, NotFound. EditorView is dynamically imported so it tree-shakes out of the Present-only build.",
+          "position": {
+            "x": 560,
+            "y": 200
+          }
+        },
+        {
+          "id": "canvas",
+          "kind": "application",
+          "name": "CanvasHost (React Flow)",
+          "description": "Single persistent <ReactFlow> instance — never keyed on diagramId. Custom node/edge components; per-diagram viewport cached in the store (ADR-0006).",
+          "position": {
+            "x": 840,
+            "y": 200
+          }
+        },
+        {
+          "id": "present-ui",
+          "kind": "service",
+          "name": "Present UI",
+          "description": "Read-only chrome: DetailDrawer, Breadcrumb, FilterBar, CapturePngButton, CommandPalette (Fuse.js).",
+          "tags": [
+            "present"
+          ],
+          "position": {
+            "x": 840,
+            "y": 60
+          }
+        },
+        {
+          "id": "editor-ui",
+          "kind": "service",
+          "name": "Editor UI",
+          "description": "NodePalette, PropertiesPanel, ValidationPanel, EditorTopBar, NewProjectDialog. Tree-shaken from the Present-only bundle (ADR-0010).",
+          "tags": [
+            "editor",
+            "tree-shakeable"
+          ],
+          "position": {
+            "x": 840,
+            "y": 340
+          }
+        },
+        {
+          "id": "store",
+          "kind": "service",
+          "name": "Zustand store",
+          "description": "Projects (validated), nav stack, selection, viewports, pulse target, editor history (50-entry snapshot stack — ADR-0009). Only holds Zod-validated Project objects.",
+          "position": {
+            "x": 560,
+            "y": 340
+          }
+        },
+        {
+          "id": "loader",
+          "kind": "service",
+          "name": "Loader + Zod schema",
+          "description": "projectLoader fetches manifest.json + per-project JSON, runs lib/schema (Zod) + three-tier validation in lib/loader, applies migrations. Only the validated Project shape reaches the store (ADR-0007).",
+          "position": {
+            "x": 280,
+            "y": 340
+          }
+        },
+        {
+          "id": "serializer",
+          "kind": "service",
+          "name": "Serializer + drafts",
+          "description": "lib/persistence canonical serializer (deterministic key order, 2-space indent) — the single producer of stored JSON. lib/drafts owns localStorage autosave keyed by commit() boundaries (ADR-0004 / ADR-0009).",
+          "position": {
+            "x": 0,
+            "y": 340
+          }
+        },
+        {
+          "id": "auto-layout",
+          "kind": "service",
+          "name": "Auto-layout (elkjs)",
+          "description": "elkjs adapter in lib/autoLayout. Dynamically imported only when the editor invokes Layout → Auto-arrange so elkjs stays out of the Present bundle (ADR-0005).",
+          "tags": [
+            "editor",
+            "dynamic-import"
+          ],
+          "position": {
+            "x": 560,
+            "y": 480
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-entry-router",
+          "source": "entry",
+          "target": "router",
+          "type": "rest"
+        },
+        {
+          "id": "e-router-shell",
+          "source": "router",
+          "target": "shell",
+          "type": "rest"
+        },
+        {
+          "id": "e-router-pages",
+          "source": "router",
+          "target": "pages",
+          "type": "rest"
+        },
+        {
+          "id": "e-shell-nav",
+          "source": "shell",
+          "target": "nav-controller",
+          "type": "generic",
+          "label": "mounts"
+        },
+        {
+          "id": "e-nav-store",
+          "source": "nav-controller",
+          "target": "store",
+          "type": "rest",
+          "label": "syncs stack"
+        },
+        {
+          "id": "e-pages-canvas",
+          "source": "pages",
+          "target": "canvas",
+          "type": "rest",
+          "label": "renders"
+        },
+        {
+          "id": "e-pages-store",
+          "source": "pages",
+          "target": "store",
+          "type": "rest"
+        },
+        {
+          "id": "e-canvas-present",
+          "source": "canvas",
+          "target": "present-ui",
+          "type": "rest"
+        },
+        {
+          "id": "e-canvas-editor",
+          "source": "canvas",
+          "target": "editor-ui",
+          "type": "rest"
+        },
+        {
+          "id": "e-canvas-store",
+          "source": "canvas",
+          "target": "store",
+          "type": "rest",
+          "label": "read / write"
+        },
+        {
+          "id": "e-loader-store",
+          "source": "loader",
+          "target": "store",
+          "type": "rest",
+          "label": "hydrates"
+        },
+        {
+          "id": "e-loader-serializer",
+          "source": "loader",
+          "target": "serializer",
+          "type": "file",
+          "label": "round-trip"
+        },
+        {
+          "id": "e-editor-serializer",
+          "source": "editor-ui",
+          "target": "serializer",
+          "type": "file",
+          "label": "save / export"
+        },
+        {
+          "id": "e-editor-autolayout",
+          "source": "editor-ui",
+          "target": "auto-layout",
+          "type": "rest",
+          "label": "arrange"
+        }
+      ]
+    }
+  ]
+}
