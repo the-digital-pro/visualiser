@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "id": "booking",
+  "name": "Booking Website",
+  "description": "Consumer-facing flow from search to confirmation, including the payments hop.",
+  "owners": [
+    "booking-team"
+  ],
+  "tags": [
+    "consumer",
+    "revenue"
+  ],
+  "homeDiagramId": "context",
+  "diagrams": [
+    {
+      "id": "context",
+      "name": "System context",
+      "description": "Booking website calls Payments for authorisation; click the dashed edge to follow.",
+      "nodes": [
+        {
+          "id": "customer",
+          "kind": "actor",
+          "name": "Customer",
+          "description": "Searches inventory, picks a slot, pays.",
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "booking-web",
+          "kind": "application",
+          "name": "Booking Web",
+          "description": "Single-page app served from the edge. Drills into internal containers.",
+          "childDiagramId": "internals",
+          "position": {
+            "x": 320,
+            "y": 0
+          }
+        },
+        {
+          "id": "inventory",
+          "kind": "system",
+          "name": "Inventory Service",
+          "description": "External partner — slot availability and pricing.",
+          "position": {
+            "x": 640,
+            "y": -120
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-customer-web",
+          "source": "customer",
+          "target": "booking-web",
+          "type": "rest",
+          "label": "HTTPS"
+        },
+        {
+          "id": "e-web-inventory",
+          "source": "booking-web",
+          "target": "inventory",
+          "type": "rest",
+          "label": "GET /slots"
+        },
+        {
+          "id": "e-web-payments",
+          "source": "booking-web",
+          "targetRef": "payments:container:order-api",
+          "type": "rest",
+          "label": "POST /authorise",
+          "tags": [
+            "cross-project"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "internals",
+      "name": "Internals",
+      "description": "Inside Booking Web — BFF + datastore.",
+      "nodes": [
+        {
+          "id": "ui",
+          "kind": "application",
+          "name": "Booking UI",
+          "description": "React app bundled and served from the BFF.",
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "bff",
+          "kind": "service",
+          "name": "Booking BFF",
+          "description": "Per-page composition; orchestrates inventory + payments calls.",
+          "position": {
+            "x": 280,
+            "y": 0
+          }
+        },
+        {
+          "id": "booking-db",
+          "kind": "datastore",
+          "name": "Booking DB",
+          "description": "Reservations, holds, confirmations.",
+          "position": {
+            "x": 560,
+            "y": 0
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-ui-bff",
+          "source": "ui",
+          "target": "bff",
+          "type": "rest"
+        },
+        {
+          "id": "e-bff-db",
+          "source": "bff",
+          "target": "booking-db",
+          "type": "jdbc"
+        }
+      ]
+    }
+  ],
+  "tours": [
+    {
+      "id": "new-joiner",
+      "name": "Booking → Payments for a new joiner",
+      "description": "A five-stop walk that lands a new joiner on the headline cross-project hop.",
+      "stops": [
+        {
+          "ref": "booking:context:customer",
+          "note": "Every flow starts here. A customer hits Booking Web from the public internet."
+        },
+        {
+          "ref": "booking:context:booking-web",
+          "note": "Booking Web is the consumer entry point. Double-click to drill into its internals — or follow the dashed edge to see how it hands off to Payments."
+        },
+        {
+          "ref": "booking:context",
+          "note": "Notice the dashed edge labelled POST /authorise. That edge crosses the project boundary — its target lives in the Payments Platform, not in Booking. Watch what happens next."
+        },
+        {
+          "ref": "payments:container:order-api",
+          "note": "We've crossed projects. Order API is the public REST surface of the Payments Platform; this is where every authorise / capture / refund enters."
+        },
+        {
+          "ref": "payments:container:auth-engine",
+          "note": "Auth Engine is where the actual risk + processor routing happens. From here, requests fan out to the ledger, the event bus, and the PCI vault."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "id": "payments",
+  "name": "Payments Platform",
+  "description": "Authorisation, capture, settlement, and reconciliation for card payments.",
+  "owners": [
+    "payments-platform-team"
+  ],
+  "tags": [
+    "platform",
+    "critical-path"
+  ],
+  "homeDiagramId": "context",
+  "diagrams": [
+    {
+      "id": "context",
+      "name": "System context",
+      "description": "How the Payments Platform sits between merchants, card networks, and banks.",
+      "nodes": [
+        {
+          "id": "merchant",
+          "kind": "actor",
+          "name": "Merchant",
+          "description": "Initiates an authorisation against a buyer's card.",
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "platform",
+          "kind": "system",
+          "name": "Payments Platform",
+          "description": "Internal containers handle auth, capture, settlement, and reconciliation.",
+          "childDiagramId": "container",
+          "position": {
+            "x": 320,
+            "y": 0
+          }
+        },
+        {
+          "id": "card-network",
+          "kind": "system",
+          "name": "Card Network",
+          "description": "Visa / MasterCard / Amex.",
+          "position": {
+            "x": 640,
+            "y": -120
+          }
+        },
+        {
+          "id": "issuing-bank",
+          "kind": "system",
+          "name": "Issuing Bank",
+          "description": "Holds the cardholder's funds.",
+          "position": {
+            "x": 640,
+            "y": 120
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-merchant-platform",
+          "source": "merchant",
+          "target": "platform",
+          "type": "rest",
+          "label": "POST /authorise"
+        },
+        {
+          "id": "e-platform-network",
+          "source": "platform",
+          "target": "card-network",
+          "type": "rest",
+          "label": "ISO-8583"
+        },
+        {
+          "id": "e-platform-bank",
+          "source": "platform",
+          "target": "issuing-bank",
+          "type": "rest",
+          "label": "settlement"
+        }
+      ]
+    },
+    {
+      "id": "container",
+      "name": "Containers",
+      "description": "Internal services that make up the Payments Platform.",
+      "nodes": [
+        {
+          "id": "order-api",
+          "kind": "service",
+          "name": "Order API",
+          "description": "Public REST surface. Accepts authorise / capture / refund requests.",
+          "tags": [
+            "public",
+            "rest"
+          ],
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "auth-engine",
+          "kind": "service",
+          "name": "Auth Engine",
+          "description": "Validates risk, routes to the appropriate processor.",
+          "position": {
+            "x": 280,
+            "y": 0
+          }
+        },
+        {
+          "id": "ledger",
+          "kind": "datastore",
+          "name": "Ledger",
+          "description": "Double-entry ledger. Source of truth for balances.",
+          "position": {
+            "x": 280,
+            "y": 160
+          }
+        },
+        {
+          "id": "events",
+          "kind": "queue",
+          "name": "Event Bus",
+          "description": "Domain events for downstream consumers (analytics, fraud, ops).",
+          "position": {
+            "x": 280,
+            "y": -160
+          }
+        },
+        {
+          "id": "vault",
+          "kind": "datastore",
+          "name": "PCI Vault",
+          "description": "Tokenised card data. Restricted access, audit logged.",
+          "tags": [
+            "pci",
+            "restricted"
+          ],
+          "position": {
+            "x": 560,
+            "y": 0
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-order-auth",
+          "source": "order-api",
+          "target": "auth-engine",
+          "type": "rest",
+          "label": "internal RPC"
+        },
+        {
+          "id": "e-auth-ledger",
+          "source": "auth-engine",
+          "target": "ledger",
+          "type": "jdbc"
+        },
+        {
+          "id": "e-auth-events",
+          "source": "auth-engine",
+          "target": "events",
+          "type": "async",
+          "label": "auth.attempted"
+        },
+        {
+          "id": "e-auth-vault",
+          "source": "auth-engine",
+          "target": "vault",
+          "type": "rest",
+          "label": "tokenise"
+        }
+      ]
+    }
+  ]
+}

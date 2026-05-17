@@ -1,0 +1,594 @@
+{
+  "schemaVersion": 1,
+  "id": "react-web-app",
+  "name": "React Web Application",
+  "description": "Reference architecture for a typical React + Node.js web application. Fork it or copy the nodes you need into your own project.",
+  "owners": [
+    "platform-team"
+  ],
+  "tags": [
+    "reference",
+    "react",
+    "node-js",
+    "template"
+  ],
+  "homeDiagramId": "context",
+  "diagrams": [
+    {
+      "id": "context",
+      "name": "System context",
+      "description": "How users, the React SPA, and supporting platforms relate. Double-click the **React SPA** or **Backend API** to drill into their internals.",
+      "nodes": [
+        {
+          "id": "user",
+          "kind": "actor",
+          "name": "End user",
+          "description": "**End user** accessing the app via a modern browser.\n\n- Cold loads land on the CDN.\n- Repeat loads hit the service worker first, then network.\n- Auth flows redirect through the auth provider.",
+          "tags": [
+            "external"
+          ],
+          "position": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        {
+          "id": "cdn",
+          "kind": "infra",
+          "name": "CDN",
+          "description": "**CDN edge** — caches the SPA bundle, fonts, and images close to the user.\n\nCommon options: **Cloudflare**, **Fastly**, **AWS CloudFront**, **Vercel/Netlify edge**.",
+          "tags": [
+            "edge"
+          ],
+          "position": {
+            "x": 320,
+            "y": 60
+          }
+        },
+        {
+          "id": "react-app",
+          "kind": "application",
+          "name": "React SPA",
+          "description": "The **React single-page app** itself. Mounted in the browser, talks to the backend over HTTPS.\n\nDrill in to see the internal layering: entry point → router → state/query → components.",
+          "childDiagramId": "frontend",
+          "tags": [
+            "spa",
+            "client"
+          ],
+          "position": {
+            "x": 320,
+            "y": 200
+          }
+        },
+        {
+          "id": "analytics",
+          "kind": "system",
+          "name": "Analytics",
+          "description": "**Product analytics** — page views, custom events, funnels.\n\nUsually pushed via a tiny client SDK, batched and sent to a SaaS such as **PostHog**, **Mixpanel**, **Amplitude**, or **Google Analytics**.",
+          "tags": [
+            "external",
+            "saas"
+          ],
+          "position": {
+            "x": 320,
+            "y": 340
+          }
+        },
+        {
+          "id": "backend",
+          "kind": "system",
+          "name": "Backend API",
+          "description": "**Backend API** — Node.js service exposing the data and business logic the SPA needs.\n\nDrill in for the internal breakdown: gateway → BFF → domain services → datastores.",
+          "childDiagramId": "backend",
+          "tags": [
+            "platform"
+          ],
+          "position": {
+            "x": 640,
+            "y": 200
+          }
+        },
+        {
+          "id": "auth",
+          "kind": "system",
+          "name": "Auth provider",
+          "description": "**Identity / auth provider**. Handles sign-up, sign-in, social, MFA, password resets.\n\nCommon picks: **Clerk**, **Auth0**, **AWS Cognito**, **Supabase Auth**, **Keycloak**.\n\nUses OAuth2 + PKCE from the SPA; backend validates the resulting JWT.",
+          "tags": [
+            "external",
+            "auth"
+          ],
+          "position": {
+            "x": 960,
+            "y": 100
+          }
+        },
+        {
+          "id": "payments",
+          "kind": "system",
+          "name": "Payments",
+          "description": "**Payments provider** (Stripe, Adyen, etc.). Backend orchestrates charges via REST; webhook callbacks update the backend on async events.",
+          "tags": [
+            "external"
+          ],
+          "position": {
+            "x": 960,
+            "y": 300
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-user-cdn",
+          "source": "user",
+          "target": "cdn",
+          "type": "rest",
+          "label": "GET /static/*"
+        },
+        {
+          "id": "e-cdn-app",
+          "source": "cdn",
+          "target": "react-app",
+          "type": "file",
+          "label": "bundle + assets"
+        },
+        {
+          "id": "e-user-app",
+          "source": "user",
+          "target": "react-app",
+          "type": "rest",
+          "label": "HTTPS"
+        },
+        {
+          "id": "e-app-backend",
+          "source": "react-app",
+          "target": "backend",
+          "type": "rest",
+          "label": "POST /api/*"
+        },
+        {
+          "id": "e-app-auth",
+          "source": "react-app",
+          "target": "auth",
+          "type": "auth",
+          "label": "OAuth2 / PKCE"
+        },
+        {
+          "id": "e-app-analytics",
+          "source": "react-app",
+          "target": "analytics",
+          "type": "async",
+          "label": "track events"
+        },
+        {
+          "id": "e-backend-auth",
+          "source": "backend",
+          "target": "auth",
+          "type": "auth",
+          "label": "validate JWT"
+        },
+        {
+          "id": "e-backend-payments",
+          "source": "backend",
+          "target": "payments",
+          "type": "rest",
+          "label": "POST /charges"
+        }
+      ]
+    },
+    {
+      "id": "frontend",
+      "name": "Frontend architecture",
+      "description": "Internal layering of the React SPA. Build tooling on the left, runtime composition in the middle, presentation layer on the right.",
+      "nodes": [
+        {
+          "id": "vite",
+          "kind": "infra",
+          "name": "Vite",
+          "description": "**Vite** — dev server (esbuild) + production build (Rollup). Reads `vite.config.ts`, plugins for React, Tailwind, etc.\n\nAlternatives: **Webpack**, **Turbopack**, **esbuild** standalone.",
+          "tags": [
+            "build"
+          ],
+          "position": {
+            "x": 0,
+            "y": 60
+          }
+        },
+        {
+          "id": "typescript",
+          "kind": "infra",
+          "name": "TypeScript",
+          "description": "**TypeScript** — type-checks the codebase at build time via `tsc --noEmit`. Vite uses esbuild for the runtime transform (no type-check), so the TS step runs in parallel.",
+          "tags": [
+            "build"
+          ],
+          "position": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        {
+          "id": "entry",
+          "kind": "application",
+          "name": "main.tsx",
+          "description": "**App entry** — `createRoot(...).render(<App />)`.\n\nMounts the app inside `<React.StrictMode>` in development. Imports global CSS once.",
+          "tags": [
+            "entry"
+          ],
+          "position": {
+            "x": 0,
+            "y": 340
+          }
+        },
+        {
+          "id": "router",
+          "kind": "service",
+          "name": "Router",
+          "description": "**React Router v6+** — URL ↔ route mapping.\n\n- `createBrowserRouter` for SPA routing.\n- Code-split route components via `lazy(() => import(...))`.\n- `useNavigate` / `useLocation` inside components.",
+          "tags": [
+            "client"
+          ],
+          "position": {
+            "x": 280,
+            "y": 200
+          }
+        },
+        {
+          "id": "state",
+          "kind": "service",
+          "name": "Global state store",
+          "description": "**Client-side state** — UI state, selection, transient flags.\n\nPick one:\n\n- **Zustand** (recommended, simple, hooks-friendly)\n- **Redux Toolkit** (richer dev tools)\n- **Jotai** / **Recoil** (atomic state)\n- **React Context** (for small leaf trees)",
+          "tags": [
+            "state"
+          ],
+          "position": {
+            "x": 560,
+            "y": 100
+          }
+        },
+        {
+          "id": "query",
+          "kind": "service",
+          "name": "Server-state cache",
+          "description": "**Server state** — fetched data + caching + revalidation.\n\nPick one:\n\n- **TanStack Query** (most ergonomic)\n- **SWR**\n- **RTK Query** (if Redux Toolkit already in use)\n- **Apollo Client** (if GraphQL)",
+          "tags": [
+            "state"
+          ],
+          "position": {
+            "x": 560,
+            "y": 240
+          }
+        },
+        {
+          "id": "components",
+          "kind": "application",
+          "name": "Shared components",
+          "description": "**UI primitives** + composed components used across pages — forms, dialogs, tables, charts.\n\nKeep accessible by default (use a primitive lib like **Radix UI** as the base).",
+          "tags": [
+            "ui"
+          ],
+          "position": {
+            "x": 840,
+            "y": 100
+          }
+        },
+        {
+          "id": "design-tokens",
+          "kind": "application",
+          "name": "Design system",
+          "description": "**Design tokens + styling** — colours, spacing, typography, dark/light themes.\n\nCommon combo: **Tailwind CSS** + **shadcn/ui** generated components, with HSL CSS variables for theme switching.",
+          "tags": [
+            "ui"
+          ],
+          "position": {
+            "x": 840,
+            "y": 240
+          }
+        },
+        {
+          "id": "pages",
+          "kind": "application",
+          "name": "Page components",
+          "description": "**Route-bound page components** — one per top-level URL.\n\nKeep these *thin*: orchestrate hooks, render shared components, defer logic to services/hooks.",
+          "tags": [
+            "ui"
+          ],
+          "position": {
+            "x": 280,
+            "y": 380
+          }
+        },
+        {
+          "id": "service-worker",
+          "kind": "infra",
+          "name": "Service worker",
+          "description": "**Service worker** — installable PWA, offline cache, background sync.\n\nVite has `vite-plugin-pwa` which generates the SW for you.",
+          "tags": [
+            "client",
+            "optional"
+          ],
+          "position": {
+            "x": 560,
+            "y": 380
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-vite-entry",
+          "source": "vite",
+          "target": "entry",
+          "type": "file",
+          "label": "bundles"
+        },
+        {
+          "id": "e-ts-entry",
+          "source": "typescript",
+          "target": "entry",
+          "type": "file",
+          "label": "type-checks"
+        },
+        {
+          "id": "e-entry-router",
+          "source": "entry",
+          "target": "router",
+          "type": "rest"
+        },
+        {
+          "id": "e-router-pages",
+          "source": "router",
+          "target": "pages",
+          "type": "rest",
+          "label": "renders"
+        },
+        {
+          "id": "e-pages-state",
+          "source": "pages",
+          "target": "state",
+          "type": "rest",
+          "label": "useStore"
+        },
+        {
+          "id": "e-pages-query",
+          "source": "pages",
+          "target": "query",
+          "type": "rest",
+          "label": "useQuery"
+        },
+        {
+          "id": "e-pages-components",
+          "source": "pages",
+          "target": "components",
+          "type": "rest",
+          "label": "uses"
+        },
+        {
+          "id": "e-components-tokens",
+          "source": "components",
+          "target": "design-tokens",
+          "type": "rest",
+          "label": "styles"
+        },
+        {
+          "id": "e-vite-sw",
+          "source": "vite",
+          "target": "service-worker",
+          "type": "file",
+          "label": "generates"
+        }
+      ]
+    },
+    {
+      "id": "backend",
+      "name": "Backend architecture",
+      "description": "Node.js API and supporting infrastructure. Requests enter via the gateway, fan out through domain services, and land in the datastores.",
+      "nodes": [
+        {
+          "id": "gateway",
+          "kind": "service",
+          "name": "API Gateway",
+          "description": "**Edge router** — TLS termination, rate limiting, request validation, auth header check.\n\nOptions: **NGINX**, **Traefik**, **API Gateway (AWS/GCP)**, or a thin Node layer (Fastify) doing the same.",
+          "tags": [
+            "edge"
+          ],
+          "position": {
+            "x": 0,
+            "y": 200
+          }
+        },
+        {
+          "id": "auth-mw",
+          "kind": "service",
+          "name": "Auth middleware",
+          "description": "**JWT validation + session loading**. Decodes the token from the `Authorization` header, fetches the user context, attaches to the request.\n\nRejects unauthenticated requests with 401 before they reach business logic.",
+          "tags": [
+            "auth"
+          ],
+          "position": {
+            "x": 280,
+            "y": 60
+          }
+        },
+        {
+          "id": "rest-api",
+          "kind": "service",
+          "name": "REST API",
+          "description": "**Public HTTP surface** — typically Fastify or Express. Thin handlers that parse + validate input, then delegate to the BFF.\n\nValidate everything at the boundary (e.g., **Zod** schemas, **TypeBox**).",
+          "tags": [
+            "public"
+          ],
+          "position": {
+            "x": 280,
+            "y": 200
+          }
+        },
+        {
+          "id": "bff",
+          "kind": "service",
+          "name": "BFF",
+          "description": "**Backend-For-Frontend** — composes calls across multiple domain services into a single response shape tailored to the UI.\n\nKeeps the SPA from making N round-trips per screen.",
+          "tags": [
+            "composition"
+          ],
+          "position": {
+            "x": 560,
+            "y": 100
+          }
+        },
+        {
+          "id": "domain",
+          "kind": "service",
+          "name": "Domain services",
+          "description": "**Business logic** — pure functions over the domain model. No HTTP, no Express imports here. Easy to unit-test.\n\nDepend on repositories that abstract the datastore.",
+          "tags": [
+            "core"
+          ],
+          "position": {
+            "x": 560,
+            "y": 240
+          }
+        },
+        {
+          "id": "db",
+          "kind": "datastore",
+          "name": "Postgres",
+          "description": "**Primary relational store** — the source of truth.\n\nAccess via a typed ORM (**Drizzle**, **Prisma**, **Kysely**) or hand-rolled SQL with **node-postgres**.\n\nUse migrations from day one.",
+          "tags": [
+            "persistence"
+          ],
+          "position": {
+            "x": 840,
+            "y": 60
+          }
+        },
+        {
+          "id": "cache",
+          "kind": "datastore",
+          "name": "Redis",
+          "description": "**Hot cache + session store**.\n\nUseful for: session tokens, rate-limit counters, ephemeral keyspace, pub/sub fan-out, BullMQ backing.",
+          "tags": [
+            "cache"
+          ],
+          "position": {
+            "x": 840,
+            "y": 200
+          }
+        },
+        {
+          "id": "queue",
+          "kind": "queue",
+          "name": "Background jobs",
+          "description": "**Async work** — anything you don't want on the request path.\n\nOptions: **BullMQ** (Redis-backed), **Inngest**, **Temporal**, **SQS + workers**.",
+          "tags": [
+            "async"
+          ],
+          "position": {
+            "x": 840,
+            "y": 340
+          }
+        },
+        {
+          "id": "s3",
+          "kind": "datastore",
+          "name": "Object storage",
+          "description": "**Blob storage** — uploads, generated reports, image processing inputs/outputs.\n\nOptions: **S3**, **R2**, **GCS**, **Azure Blob**.",
+          "tags": [
+            "persistence"
+          ],
+          "position": {
+            "x": 560,
+            "y": 380
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-gw-auth",
+          "source": "gateway",
+          "target": "auth-mw",
+          "type": "auth",
+          "label": "verify"
+        },
+        {
+          "id": "e-gw-api",
+          "source": "gateway",
+          "target": "rest-api",
+          "type": "rest",
+          "label": "proxy"
+        },
+        {
+          "id": "e-api-bff",
+          "source": "rest-api",
+          "target": "bff",
+          "type": "rest"
+        },
+        {
+          "id": "e-bff-domain",
+          "source": "bff",
+          "target": "domain",
+          "type": "rest"
+        },
+        {
+          "id": "e-domain-db",
+          "source": "domain",
+          "target": "db",
+          "type": "jdbc",
+          "label": "SQL"
+        },
+        {
+          "id": "e-domain-cache",
+          "source": "domain",
+          "target": "cache",
+          "type": "jdbc",
+          "label": "GET / SET"
+        },
+        {
+          "id": "e-domain-queue",
+          "source": "domain",
+          "target": "queue",
+          "type": "async",
+          "label": "enqueue"
+        },
+        {
+          "id": "e-bff-s3",
+          "source": "bff",
+          "target": "s3",
+          "type": "rest",
+          "label": "presigned URLs"
+        }
+      ]
+    }
+  ],
+  "tours": [
+    {
+      "id": "react-app-walkthrough",
+      "name": "React web app — guided tour",
+      "description": "A six-stop walkthrough of the reference architecture, ending at the database that backs it all.",
+      "stops": [
+        {
+          "ref": "react-web-app:context:user",
+          "note": "**Every flow starts here.** An end user hits a URL in their browser. The first request usually lands on the CDN; subsequent requests go through the React SPA."
+        },
+        {
+          "ref": "react-web-app:context:react-app",
+          "note": "The **React SPA** is the entire client surface. It's served as a static bundle and runs in the browser.\n\nDouble-click this node any time to drill into its internals — or just continue the tour."
+        },
+        {
+          "ref": "react-web-app:frontend:router",
+          "note": "Inside the SPA, the **router** maps URLs to page components.\n\nKeep page components thin: they orchestrate hooks and compose shared components, nothing more."
+        },
+        {
+          "ref": "react-web-app:frontend:query",
+          "note": "**Server state vs. client state** is the single most important architectural split in a modern React app.\n\nThe **Query cache** owns anything that came from the backend; the **State store** owns anything that lives only in the browser."
+        },
+        {
+          "ref": "react-web-app:backend:gateway",
+          "note": "We've crossed the network boundary. The **API gateway** is the first thing every request hits — TLS, rate limiting, auth header check.\n\nNo business logic here, just policy."
+        },
+        {
+          "ref": "react-web-app:backend:db",
+          "note": "And we land at **Postgres**, the source of truth. Every other store (Redis cache, S3 blobs, the queue) is downstream of this one.\n\nGuard it accordingly: typed access, migrations, backups, observability."
+        }
+      ]
+    }
+  ]
+}
