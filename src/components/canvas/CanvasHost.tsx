@@ -486,7 +486,7 @@ function CanvasInner({
         fitView
       >
         <Background gap={20} />
-        <MiniMap pannable zoomable />
+        <MiniMap pannable zoomable style={{ width: 140, height: 100 }} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>

@@ -165,7 +165,17 @@ Adjust as needed. Two principles:
 6. `tags` *(omit if missing)*
 7. `homeDiagramId`
 8. `diagrams`
-9. `tours` *(omit — out of scope for this skill)*
+9. `tours` — required: emit the start-to-finish walkthrough as `tours[0]`. Additional themed tours optional.
+
+**Tour:**
+1. `id` (the walkthrough tour must use `walkthrough`)
+2. `name`
+3. `description` *(omit if missing)*
+4. `stops`
+
+**TourStop:**
+1. `ref` — `projectId:diagramId` or `projectId:diagramId:nodeId`
+2. `note` — one or two plain-English sentences
 
 **Diagram:**
 1. `id`

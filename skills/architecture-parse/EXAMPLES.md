@@ -409,6 +409,47 @@ acme-saas/
         }
       ]
     }
+  ],
+  "tours": [
+    {
+      "id": "walkthrough",
+      "name": "Start-to-finish walkthrough",
+      "description": "Follow a customer request from browser to database and back.",
+      "stops": [
+        {
+          "ref": "acme-saas:context:user",
+          "note": "A signed-in customer in a modern browser. Every request that matters starts here."
+        },
+        {
+          "ref": "acme-saas:context:cdn",
+          "note": "CloudFront serves the SPA bundle and static assets from the edge — first byte is usually a cache hit."
+        },
+        {
+          "ref": "acme-saas:context:web",
+          "note": "React SPA boots, validates the Clerk session, and renders the route. Cross into the frontend diagram to see the layering."
+        },
+        {
+          "ref": "acme-saas:frontend:query",
+          "note": "TanStack Query is the only thing in the SPA that talks to the API. It batches, caches, and revalidates server data."
+        },
+        {
+          "ref": "acme-saas:context:api",
+          "note": "The Fastify service receives the API call over HTTPS. JWT from Clerk gets validated before the handler runs."
+        },
+        {
+          "ref": "acme-saas:backend:domain",
+          "note": "Domain services hold the business logic. They are framework-free and unit-tested directly."
+        },
+        {
+          "ref": "acme-saas:backend:pg",
+          "note": "Reads/writes go to Postgres through Drizzle. Anything cacheable lands in Redis on the way back."
+        },
+        {
+          "ref": "acme-saas:context:stripe",
+          "note": "Charges fire off to Stripe via POST. Stripe webhooks come back in the other direction — that path is worth a second tour."
+        }
+      ]
+    }
   ]
 }
 ```
@@ -421,9 +462,14 @@ acme-saas/
   subject system in the middle (x=320–640), externals on the right
   (x=960). All on the 20px grid.
 - The **owners** field was omitted because no `CODEOWNERS` was found.
-- **Tours** are omitted by design — that's a sibling skill's job.
+- The **walkthrough tour** is the headline output. It walks a real request
+  flow: user → CDN → SPA → server-state cache → API → domain → Postgres →
+  Stripe. Eight stops; each note explains what's happening at that node,
+  not what the diagram already shows.
 - The Web and API nodes carry `childDiagramId` so the user can drill in
-  from the context diagram.
+  from the context diagram — and the walkthrough naturally crosses those
+  boundaries by referencing nodes inside the `frontend` and `backend`
+  diagrams.
 - Cross-project `targetRef` was not needed — this is a single monorepo /
   single project. If two siblings of this skill produce separate JSONs
   for two related codebases, the user can wire cross-project edges by

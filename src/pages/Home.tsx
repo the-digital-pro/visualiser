@@ -1,6 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, FileBox, Play, Plus, Trash2 } from "lucide-react";
+import {
+  Download,
+  FileBox,
+  Folder,
+  Layers,
+  Play,
+  Plus,
+  Sparkles,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { ManifestSchema, ProjectInputSchema, type Manifest } from "@/lib/schema";
 import { navigation } from "@/lib/navigation";
 
@@ -16,12 +26,17 @@ const NewProjectDialog = EDITOR_ENABLED
     )
   : null;
 
-interface TourSummary {
-  projectId: string;
-  tourId: string;
-  name: string;
+interface ProjectStats {
+  diagrams: number;
+  tours: number;
+}
+
+interface DraftOverlay {
+  name?: string;
   description?: string;
-  stops: number;
+  owners?: string[];
+  tags?: string[];
+  hasDraft: boolean;
 }
 
 interface LocalDraft {
@@ -32,13 +47,49 @@ interface LocalDraft {
 
 export function Home() {
   const [manifest, setManifest] = useState<Manifest | null>(null);
-  const [tours, setTours] = useState<TourSummary[]>([]);
+  const [stats, setStats] = useState<Record<string, ProjectStats>>({});
+  const [overlays, setOverlays] = useState<Record<string, DraftOverlay>>({});
   const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
 
-  // Discover local drafts (editor builds only). Re-runs whenever the dialog
-  // closes so a freshly-created project surfaces immediately.
+  // Read draft metadata for each bundled project and overlay it on the card.
+  // Re-runs on `storage` events so edits in another tab (or made after this
+  // page mounted) surface live without a full page reload.
+  const refreshOverlays = useCallback(async (projectIds: string[]) => {
+    if (!EDITOR_ENABLED) {
+      setOverlays({});
+      return;
+    }
+    const { readDraft } = await import("@/lib/drafts");
+    const next: Record<string, DraftOverlay> = {};
+    for (const id of projectIds) {
+      const env = readDraft(id);
+      if (!env) continue;
+      try {
+        const proj = JSON.parse(env.json) as {
+          name?: string;
+          description?: string;
+          owners?: string[];
+          tags?: string[];
+        };
+        next[id] = {
+          name: typeof proj.name === "string" ? proj.name : undefined,
+          description:
+            typeof proj.description === "string" ? proj.description : undefined,
+          owners: Array.isArray(proj.owners) ? proj.owners : undefined,
+          tags: Array.isArray(proj.tags) ? proj.tags : undefined,
+          hasDraft: true,
+        };
+      } catch {
+        // Broken JSON — skip; the user's editor will surface the issue.
+      }
+    }
+    setOverlays(next);
+  }, []);
+
+  // Discover local-only drafts (editor builds only). Re-runs whenever the
+  // dialog closes so a freshly-created project surfaces immediately.
   const refreshDrafts = useCallback(async () => {
     if (!EDITOR_ENABLED) return;
     const { summariseDrafts } = await import("@/lib/drafts");
@@ -59,27 +110,40 @@ export function Home() {
           return;
         }
         setManifest(result.data);
-        const summaries = await Promise.all(
+        const perProject = await Promise.all(
           result.data.projects.map(async (p) => {
             const r = await fetch(`/projects/${p.id}.json`).then((res) => res.json());
             const parsed = ProjectInputSchema.safeParse(r);
-            if (!parsed.success) return [];
-            return (parsed.data.tours ?? []).map(
-              (t): TourSummary => ({
-                projectId: p.id,
-                tourId: t.id,
-                name: t.name,
-                description: t.description,
-                stops: t.stops.length,
-              }),
-            );
+            if (!parsed.success) {
+              return [p.id, { diagrams: 0, tours: 0 }] as const;
+            }
+            return [
+              p.id,
+              {
+                diagrams: parsed.data.diagrams.length,
+                tours: (parsed.data.tours ?? []).length,
+              },
+            ] as const;
           }),
         );
-        setTours(summaries.flat());
+        setStats(Object.fromEntries(perProject));
+        refreshOverlays(result.data.projects.map((p) => p.id));
       })
       .catch((e: Error) => setError(`failed to load manifest: ${e.message}`));
     refreshDrafts();
-  }, [refreshDrafts]);
+  }, [refreshDrafts, refreshOverlays]);
+
+  // Pick up draft edits made in another tab or while this page is mounted.
+  useEffect(() => {
+    if (!EDITOR_ENABLED || !manifest) return;
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || !e.key.startsWith("arcviz:draft:")) return;
+      refreshOverlays(manifest.projects.map((p) => p.id));
+      refreshDrafts();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [manifest, refreshOverlays, refreshDrafts]);
 
   const takenIds = useMemo(() => {
     const s = new Set<string>();
@@ -127,67 +191,152 @@ export function Home() {
     return <div className="text-muted-foreground">Loading projects…</div>;
   }
 
-  return (
-    <div className="mx-auto max-w-screen-2xl space-y-4 px-4 py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-          <p className="text-sm text-muted-foreground">
-            Click a project to enter its home diagram.{" "}
-            <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-xs">⌘K</kbd> opens search across all projects.
-          </p>
-        </div>
-        {EDITOR_ENABLED && (
-          <button
-            type="button"
-            onClick={() => setNewOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" /> New project
-          </button>
-        )}
-      </div>
+  const projectCount = manifest.projects.length;
 
-      {manifest.projects.length === 0 ? (
-        <div className="text-muted-foreground">No bundled projects.</div>
-      ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {manifest.projects.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                onClick={() =>
-                  navigation().push({
-                    projectId: p.id,
-                    diagramId: p.homeDiagramId,
-                  })
-                }
-                className="block w-full rounded-md border border-border p-4 text-left transition-colors hover:bg-accent"
-              >
-                <div className="font-medium">{p.name}</div>
-                {p.description && (
-                  <div className="mt-1 text-sm text-muted-foreground">{p.description}</div>
-                )}
-                {p.tags && p.tags.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {p.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-secondary-foreground"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+  return (
+    <div className="mx-auto max-w-screen-2xl space-y-6 px-4 pb-10 pt-4">
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-background to-background px-6 py-8 sm:px-10 sm:py-12">
+        <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/20 blur-3xl" aria-hidden />
+        <div className="absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-primary/10 blur-3xl" aria-hidden />
+        <div className="relative flex flex-wrap items-end justify-between gap-6">
+          <div className="max-w-2xl space-y-3">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              <Sparkles className="h-3.5 w-3.5" /> Architecture Visualizer
+            </div>
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+              Welcome back.
+            </h1>
+            <p className="text-sm text-muted-foreground sm:text-base">
+              Pick a project to start exploring — drill into containers and
+              follow service edges across project boundaries. Press{" "}
+              <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs">
+                ⌘K
+              </kbd>{" "}
+              any time to search every diagram at once.
+            </p>
+          </div>
+          {EDITOR_ENABLED && (
+            <button
+              type="button"
+              onClick={() => setNewOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+            >
+              <Plus className="h-4 w-4" /> New project
+            </button>
+          )}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-lg font-semibold tracking-tight">Projects</h2>
+          <span className="text-xs text-muted-foreground">
+            {projectCount} {projectCount === 1 ? "project" : "projects"}
+          </span>
+        </div>
+        {projectCount === 0 ? (
+          <div className="text-muted-foreground">No bundled projects.</div>
+        ) : (
+          <ul className="grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3">
+            {manifest.projects.map((p) => {
+              const s = stats[p.id];
+              const overlay = overlays[p.id];
+              // Draft fields override the published manifest field; an explicit
+              // empty array in the draft is treated as "user cleared it".
+              const name = overlay?.name ?? p.name;
+              const description = overlay?.description ?? p.description;
+              const owners = overlay?.owners ?? p.owners;
+              const tags = overlay?.tags ?? p.tags;
+              return (
+                <li key={p.id} className="group relative pt-3">
+                  {/* Folder tab */}
+                  <div
+                    aria-hidden
+                    className="absolute left-5 top-0 z-0 h-4 w-28 rounded-t-lg border border-b-0 border-border bg-card transition-transform group-hover:-translate-y-0.5"
+                  />
+                  {/* Stacked-paper edge */}
+                  <div
+                    aria-hidden
+                    className="absolute inset-x-3 -bottom-1 h-1 rounded-b-lg border border-t-0 border-border/60 bg-card/60"
+                  />
+                  <div
+                    aria-hidden
+                    className="absolute inset-x-2 -bottom-2 h-1 rounded-b-lg border border-t-0 border-border/40 bg-card/40"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigation().push({
+                        projectId: p.id,
+                        diagramId: p.homeDiagramId,
+                      })
+                    }
+                    className="relative z-10 flex h-full w-full flex-col gap-3 rounded-lg rounded-tl-none border border-border bg-card p-5 text-left shadow-sm transition-all group-hover:-translate-y-0.5 group-hover:border-primary/40 group-hover:bg-accent/40 group-hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+                        <Folder className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="truncate font-medium">{name}</div>
+                          {overlay?.hasDraft && (
+                            <span
+                              className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                              title="You have unpublished edits in your local draft."
+                            >
+                              Draft
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <Layers className="h-3 w-3" />
+                            {s ? `${s.diagrams} diagram${s.diagrams === 1 ? "" : "s"}` : "…"}
+                          </span>
+                          {s && s.tours > 0 && (
+                            <span className="inline-flex items-center gap-1">
+                              <Play className="h-3 w-3" />
+                              {s.tours} tour{s.tours === 1 ? "" : "s"}
+                            </span>
+                          )}
+                          {owners && owners.length > 0 && (
+                            <span className="inline-flex items-center gap-1">
+                              <Users className="h-3 w-3" />
+                              {owners[0]}
+                              {owners.length > 1 && ` +${owners.length - 1}`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {description && (
+                      <p className="line-clamp-3 text-sm text-muted-foreground">
+                        {description}
+                      </p>
+                    )}
+                    {tags && tags.length > 0 && (
+                      <div className="mt-auto flex flex-wrap gap-1 pt-1">
+                        {tags.map((t) => (
+                          <span
+                            key={t}
+                            className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-secondary-foreground"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       {EDITOR_ENABLED && localOnlyDrafts.length > 0 && (
-        <section className="space-y-3 pt-2">
+        <section className="space-y-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold tracking-tight">Local drafts</h2>
             <span className="text-xs text-muted-foreground">
@@ -230,35 +379,6 @@ export function Home() {
                     </button>
                   </div>
                 </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {tours.length > 0 && (
-        <section className="space-y-3 pt-2">
-          <h2 className="text-lg font-semibold tracking-tight">Guided tours</h2>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {tours.map((t) => (
-              <li key={`${t.projectId}-${t.tourId}`}>
-                <Link
-                  to={`/tour/${t.projectId}/${t.tourId}?step=1`}
-                  className="flex items-start gap-3 rounded-md border border-primary/30 bg-primary/5 p-4 transition-colors hover:bg-primary/10"
-                >
-                  <Play className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <div className="font-medium">{t.name}</div>
-                    {t.description && (
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {t.description}
-                      </div>
-                    )}
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {t.stops} stop{t.stops === 1 ? "" : "s"} · starts in {t.projectId}
-                    </div>
-                  </div>
-                </Link>
               </li>
             ))}
           </ul>

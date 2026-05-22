@@ -1,7 +1,35 @@
+import { useState, type ChangeEvent } from "react";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { editor } from "@/lib/editor";
 import { NodeKindSchema, EdgeTypeSchema, type Project } from "@/lib/schema";
+
+/**
+ * Comma-separated list input that keeps the literal typed string while the
+ * user is editing, instead of re-deriving the display from the parsed array.
+ * Without this, typing "a, b, " would snap back to "a, b" mid-keystroke and
+ * the user could never start a new entry.
+ */
+function useCommaListField(
+  storeValue: string[] | undefined,
+  apply: (next: string[] | undefined) => void,
+) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const display = draft ?? (storeValue ?? []).join(", ");
+  return {
+    display,
+    onChange: (e: ChangeEvent<HTMLInputElement>) => {
+      const text = e.target.value;
+      setDraft(text);
+      const parsed = text
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      apply(parsed.length ? parsed : undefined);
+    },
+    onBlur: () => setDraft(null),
+  };
+}
 
 interface PropertiesPanelProps {
   collapsed: boolean;
@@ -66,11 +94,7 @@ export function PropertiesPanel({ collapsed, onToggle }: PropertiesPanelProps) {
     >
       <Header onToggle={onToggle} />
       <div className="flex-1 overflow-y-auto p-4">
-        {!selection && (
-          <p className="text-sm text-muted-foreground">
-            Select a node or edge to edit its properties.
-          </p>
-        )}
+        {!selection && <ProjectProperties projectId={project.id} />}
         {selection?.nodeId && (
           <NodeProperties projectId={project.id} diagramId={diagram.id} nodeId={selection.nodeId} />
         )}
@@ -95,6 +119,124 @@ function Header({ onToggle }: { onToggle: () => void }) {
       >
         <PanelRightClose className="h-3.5 w-3.5" />
       </button>
+    </div>
+  );
+}
+
+function patchProject(
+  projectId: string,
+  patch: Partial<Project>,
+  variant: "transient" | "commit",
+) {
+  const mutator = (p: Project): Project => ({ ...p, ...patch });
+  if (variant === "commit") {
+    editor.commit(projectId, mutator);
+  } else {
+    editor.applyTransient(projectId, mutator);
+  }
+}
+
+function ProjectProperties({ projectId }: { projectId: string }) {
+  const project = useStore((s) => s.projects[projectId]);
+  if (!project) {
+    return <p className="text-sm text-muted-foreground">Project not loaded.</p>;
+  }
+
+  const startBurst = () => editor.beginTransient(projectId);
+  const endBurst = () => editor.commitTransient(projectId);
+
+  const ownersField = useCommaListField(project.owners, (next) =>
+    patchProject(projectId, { owners: next }, "transient"),
+  );
+  const tagsField = useCommaListField(project.tags, (next) =>
+    patchProject(projectId, { tags: next }, "transient"),
+  );
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Project details. Select a node or edge on the canvas to edit it instead.
+      </p>
+
+      <Field label="Name">
+        <input
+          className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring"
+          value={project.name}
+          onFocus={startBurst}
+          onChange={(e) =>
+            patchProject(projectId, { name: e.target.value }, "transient")
+          }
+          onBlur={endBurst}
+        />
+      </Field>
+
+      <Field label="Description">
+        <textarea
+          className="min-h-[80px] w-full rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+          value={project.description ?? ""}
+          onFocus={startBurst}
+          onChange={(e) =>
+            patchProject(
+              projectId,
+              { description: e.target.value || undefined },
+              "transient",
+            )
+          }
+          onBlur={endBurst}
+          placeholder="Short summary shown on the home screen folder card"
+        />
+      </Field>
+
+      <Field label="Owners (comma-separated)">
+        <input
+          className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring"
+          value={ownersField.display}
+          onFocus={startBurst}
+          onChange={ownersField.onChange}
+          onBlur={() => {
+            ownersField.onBlur();
+            endBurst();
+          }}
+          placeholder="e.g. booking-team, platform-team"
+        />
+      </Field>
+
+      <Field label="Tags (comma-separated)">
+        <input
+          className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring"
+          value={tagsField.display}
+          onFocus={startBurst}
+          onChange={tagsField.onChange}
+          onBlur={() => {
+            tagsField.onBlur();
+            endBurst();
+          }}
+        />
+      </Field>
+
+      <Field label="Home diagram">
+        <select
+          className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring"
+          value={project.homeDiagramId}
+          onChange={(e) =>
+            patchProject(projectId, { homeDiagramId: e.target.value }, "commit")
+          }
+        >
+          {project.diagrams.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name} ({d.id})
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <div className="border-t border-border pt-3 text-[10px] text-muted-foreground">
+        Project id: <code className="font-mono">{project.id}</code>
+        <div className="mt-0.5">
+          Changing the id would break cross-project edges and the file name —
+          edit the JSON manually if you need to rename.
+        </div>
+      </div>
     </div>
   );
 }
@@ -168,6 +310,10 @@ function NodeProperties({
   const startBurst = () => editor.beginTransient(projectId);
   const endBurst = () => editor.commitTransient(projectId);
 
+  const tagsField = useCommaListField(node.tags, (next) =>
+    patchNode(projectId, diagramId, nodeId, { tags: next }, "transient"),
+  );
+
   return (
     <div className="space-y-4">
       <Field label="Name">
@@ -220,22 +366,13 @@ function NodeProperties({
       <Field label="Tags (comma-separated)">
         <input
           className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring"
-          value={(node.tags ?? []).join(", ")}
+          value={tagsField.display}
           onFocus={startBurst}
-          onChange={(e) => {
-            const tags = e.target.value
-              .split(",")
-              .map((t) => t.trim())
-              .filter(Boolean);
-            patchNode(
-              projectId,
-              diagramId,
-              nodeId,
-              { tags: tags.length ? tags : undefined },
-              "transient",
-            );
+          onChange={tagsField.onChange}
+          onBlur={() => {
+            tagsField.onBlur();
+            endBurst();
           }}
-          onBlur={endBurst}
         />
       </Field>
 
