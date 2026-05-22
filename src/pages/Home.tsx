@@ -2,7 +2,9 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { Link } from "react-router-dom";
 import {
   Download,
+  Eye,
   FileBox,
+  FileUp,
   Folder,
   Layers,
   Play,
@@ -16,12 +18,19 @@ import { navigation } from "@/lib/navigation";
 
 const EDITOR_ENABLED = import.meta.env.VITE_EDITOR_ENABLED !== "false";
 
-// Tree-shaken in the present-only build — the lazy() target is unreachable
-// when EDITOR_ENABLED is false, so the dialog + its deps don't ship.
+// Tree-shaken in the present-only build — the lazy() targets are unreachable
+// when EDITOR_ENABLED is false, so the dialogs + their deps don't ship.
 const NewProjectDialog = EDITOR_ENABLED
   ? lazy(() =>
       import("@/components/editor/NewProjectDialog").then((m) => ({
         default: m.NewProjectDialog,
+      })),
+    )
+  : null;
+const ImportProjectDialog = EDITOR_ENABLED
+  ? lazy(() =>
+      import("@/components/editor/ImportProjectDialog").then((m) => ({
+        default: m.ImportProjectDialog,
       })),
     )
   : null;
@@ -52,6 +61,17 @@ export function Home() {
   const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+
+  const refreshHidden = useCallback(async () => {
+    if (!EDITOR_ENABLED) {
+      setHidden(new Set());
+      return;
+    }
+    const { listHiddenProjects } = await import("@/lib/hiddenProjects");
+    setHidden(new Set(listHiddenProjects()));
+  }, []);
 
   // Read draft metadata for each bundled project and overlay it on the card.
   // Re-runs on `storage` events so edits in another tab (or made after this
@@ -131,7 +151,8 @@ export function Home() {
       })
       .catch((e: Error) => setError(`failed to load manifest: ${e.message}`));
     refreshDrafts();
-  }, [refreshDrafts, refreshOverlays]);
+    refreshHidden();
+  }, [refreshDrafts, refreshOverlays, refreshHidden]);
 
   // Pick up draft edits made in another tab or while this page is mounted.
   useEffect(() => {
@@ -179,6 +200,31 @@ export function Home() {
     refreshDrafts();
   };
 
+  // Hide a bundled project from the home view + clear any local draft for
+  // it. Bundled JSON lives on disk so we can't truly delete it from the
+  // browser — hide + clear is the closest we get. Reversible via "Show all".
+  const deleteProject = async (id: string, name: string) => {
+    if (
+      !confirm(
+        `Delete "${name}" from your home? The bundled JSON stays on disk, but the card will be hidden and any local draft cleared. Use "Show all hidden" to restore it later.`,
+      )
+    )
+      return;
+    const { hideProject } = await import("@/lib/hiddenProjects");
+    const { clearDraft } = await import("@/lib/drafts");
+    hideProject(id);
+    clearDraft(id);
+    refreshHidden();
+    refreshDrafts();
+    refreshOverlays(manifest?.projects.map((p) => p.id) ?? []);
+  };
+
+  const restoreHidden = async () => {
+    const { clearHiddenProjects } = await import("@/lib/hiddenProjects");
+    clearHiddenProjects();
+    refreshHidden();
+  };
+
   if (error) {
     return (
       <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm">
@@ -191,7 +237,9 @@ export function Home() {
     return <div className="text-muted-foreground">Loading projects…</div>;
   }
 
-  const projectCount = manifest.projects.length;
+  const visibleProjects = manifest.projects.filter((p) => !hidden.has(p.id));
+  const projectCount = visibleProjects.length;
+  const hiddenCount = hidden.size;
 
   return (
     <div className="mx-auto max-w-screen-2xl space-y-6 px-4 pb-10 pt-4">
@@ -216,13 +264,22 @@ export function Home() {
             </p>
           </div>
           {EDITOR_ENABLED && (
-            <button
-              type="button"
-              onClick={() => setNewOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-            >
-              <Plus className="h-4 w-4" /> New project
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3.5 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
+              >
+                <FileUp className="h-4 w-4" /> Import project
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+              >
+                <Plus className="h-4 w-4" /> New project
+              </button>
+            </div>
           )}
         </div>
       </section>
@@ -230,15 +287,32 @@ export function Home() {
       <section className="space-y-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold tracking-tight">Projects</h2>
-          <span className="text-xs text-muted-foreground">
-            {projectCount} {projectCount === 1 ? "project" : "projects"}
-          </span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            {EDITOR_ENABLED && hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={restoreHidden}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 hover:bg-accent"
+                title="Restore hidden projects"
+              >
+                <Eye className="h-3 w-3" />
+                Show {hiddenCount} hidden
+              </button>
+            )}
+            <span>
+              {projectCount} {projectCount === 1 ? "project" : "projects"}
+            </span>
+          </div>
         </div>
         {projectCount === 0 ? (
-          <div className="text-muted-foreground">No bundled projects.</div>
+          <div className="text-muted-foreground">
+            {hiddenCount > 0
+              ? `All projects are hidden. Click "Show ${hiddenCount} hidden" above to restore them.`
+              : "No bundled projects."}
+          </div>
         ) : (
           <ul className="grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3">
-            {manifest.projects.map((p) => {
+            {visibleProjects.map((p) => {
               const s = stats[p.id];
               const overlay = overlays[p.id];
               // Draft fields override the published manifest field; an explicit
@@ -263,6 +337,20 @@ export function Home() {
                     aria-hidden
                     className="absolute inset-x-2 -bottom-2 h-1 rounded-b-lg border border-t-0 border-border/40 bg-card/40"
                   />
+                  {EDITOR_ENABLED && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteProject(p.id, name);
+                      }}
+                      className="absolute right-2 top-5 z-20 rounded-md border border-transparent bg-card/80 p-1 text-muted-foreground opacity-0 transition-opacity hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                      aria-label={`Delete ${name}`}
+                      title="Delete from home"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() =>
@@ -394,6 +482,24 @@ export function Home() {
               if (!o) refreshDrafts();
             }}
             takenIds={takenIds}
+          />
+        </Suspense>
+      )}
+      {EDITOR_ENABLED && ImportProjectDialog && (
+        <Suspense fallback={null}>
+          <ImportProjectDialog
+            open={importOpen}
+            onOpenChange={(o) => {
+              setImportOpen(o);
+              if (!o && manifest) {
+                refreshDrafts();
+                refreshOverlays(manifest.projects.map((p) => p.id));
+              }
+            }}
+            manifestIds={
+              new Set(manifest?.projects.map((p) => p.id) ?? [])
+            }
+            draftIds={new Set(localDrafts.map((d) => d.id))}
           />
         </Suspense>
       )}
